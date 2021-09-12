@@ -1,16 +1,19 @@
-
-#include "z80.h"
-#include "trs_screen.h"
-#include "trs_memory.h"
 #include "trs.h"
+
+#include <errno.h>
+#include <time.h>
+#include <string.h>
+#include <sys/time.h>
+#include <unistd.h>
+
 #include "i2s.h"
 #include "io.h"
+#include "key_injector.h"
+#include "trs_memory.h"
+#include "trs_screen.h"
+#include "web_debugger.h"
+#include "z80.h"
 #include <freertos/task.h>
-#include <unistd.h>
-#include <time.h>
-#include <sys/time.h>
-#include <errno.h>
-#include <string.h>
 
 
 #define CYCLES_PER_TIMER_M3 ((unsigned int) (CLOCK_MHZ_M3 * 1000000 / TIMER_HZ_M3))
@@ -23,6 +26,91 @@ int trs_model = 4;
 
 static Z80Context z80ctx;
 
+// Avoids the main thread from free spinning while paused.
+const TickType_t paused_step_delay_ = 50 / portTICK_PERIOD_MS;
+static bool debugger_pause_ = false;
+static int debugger_steps_ = 0;
+static TRX_OnPokeMemory trx_on_poke_memory_ = NULL;
+static void* trx_clazz_ = NULL;
+static KeyInjector* key_injector_ = NULL;
+
+void on_trx_control_callback(TRX_CONTROL_TYPE type) {
+	if (type == TRX_CONTROL_TYPE_STEP) debugger_steps_++;
+	else if (type == TRX_CONTROL_TYPE_CONTINUE) debugger_pause_ = false;
+	else if (type == TRX_CONTROL_TYPE_HALT) {
+    debugger_steps_ = 0;
+    debugger_pause_ = true;
+  }
+	// else if (type == TRX_CONTROL_TYPE_SOFT_RESET) soft_reset();
+	// else if (type == TRX_CONTROL_TYPE_HARD_RESET) hard_reset();
+}
+
+void on_trx_get_state_update(TRX_SystemState* state) {
+  state->registers.pc = z80ctx.PC;
+  state->registers.sp = z80ctx.R1.wr.SP;
+  state->registers.af = z80ctx.R1.wr.AF;
+  state->registers.bc = z80ctx.R1.wr.BC;
+  state->registers.de = z80ctx.R1.wr.DE;
+  state->registers.hl = z80ctx.R1.wr.HL;
+  state->registers.af_prime = z80ctx.R2.wr.AF;
+  state->registers.bc_prime = z80ctx.R2.wr.BC;
+  state->registers.de_prime = z80ctx.R2.wr.DE;
+  state->registers.hl_prime = z80ctx.R2.wr.HL;
+  state->registers.ix = z80ctx.R1.wr.IX;
+  state->registers.iy = z80ctx.R1.wr.IY;
+  state->registers.i = z80ctx.I;
+  state->registers.r7 = 0;  // TODO
+  state->registers.r = z80ctx.R;
+  state->registers.t_count = 0;  // TODO
+  state->registers.clock_mhz = 0;  // TODO
+  state->registers.iff1 = z80ctx.IFF1;
+  state->registers.iff2 = z80ctx.IFF2;
+  // TODO: Is this the same thing?
+  state->registers.interrupt_mode = z80ctx.IM;
+}
+
+void on_trx_add_breakpoint(int bp_id, uint16_t addr, TRX_BREAK_TYPE type) {
+  // int flag = BREAKPOINT_FLAG;  // TRX_BREAK_PC
+  // if (type == TRX_BREAK_MEMORY) flag = WATCHPOINT_FLAG;
+  // set_trap(addr, flag);
+}
+
+void on_trx_remove_breakpoint(int bp_id) {
+  // clear_trap(bp_id);
+}
+
+uint8_t trx_read_memory(uint16_t addr) {
+  return (uint8_t)mem_read(addr);
+}
+
+void trx_key_event(const char* key, bool down, bool shift) {
+  // Should never be able to be NULL as it is initialized at the very beginning.
+  key_injector_->inject_key(std::string(key), down, shift);
+}
+
+void trx_register_callbacks(void* clazz, TRX_OnPokeMemory on_poke_memory) {
+  trx_clazz_ = clazz;
+  trx_on_poke_memory_ = on_poke_memory;
+}
+
+void trs_init_debugger(TRS_InitDebugger init, fabgl::Keyboard* kb) {
+  key_injector_ = new KeyInjector(kb);
+
+  TRX_Context* ctx = new TRX_Context;
+  ctx->system_name = "PocketTRS";
+  ctx->model = static_cast<TRX_ModelType>(trs_model);
+  ctx->rom_version = 0;  // TODO
+  ctx->capabilities.memory_range.start = 0;
+  ctx->capabilities.memory_range.length = 0xFFFF;
+  ctx->control_callback = &on_trx_control_callback;
+  ctx->read_memory = &trx_read_memory;
+  // ctx->breakpoint_callback = &on_trx_add_breakpoint;
+  // ctx->remove_breakpoint_callback = &on_trx_remove_breakpoint;
+  ctx->get_state_update = &on_trx_get_state_update;
+  ctx->register_callbacks = &trx_register_callbacks;
+  ctx->key_event = &trx_key_event;
+  init(ctx);
+}
 
 void trs_timer_speed(int fast)
 {
@@ -33,6 +121,7 @@ void trs_timer_speed(int fast)
 
 void poke_mem(uint16_t address, uint8_t data)
 {
+  if (trx_on_poke_memory_ != NULL) trx_on_poke_memory_(address, data, trx_clazz_);
   mem_write(address, data);
 }
 
@@ -208,7 +297,17 @@ void z80_reset()
 
 void z80_run()
 {
+  if (debugger_pause_) {
+    if (debugger_steps_ > 0) debugger_steps_--;
+    else {
+      vTaskDelay(paused_step_delay_);
+      return;
+    }
+  }
   unsigned last_tstate_count = z80ctx.tstates;
+
+  // TODO: Add PC breakpoint here.
+
   Z80Execute(&z80ctx);
   total_tstate_count += z80ctx.tstates - last_tstate_count;
   if (z80ctx.tstates >= cycles_per_timer) {

@@ -21,8 +21,11 @@
 #include "trs-fs.h"
 #include "ntp_sync.h"
 
+#include "web_debugger.h"
+
 
 fabgl::PS2Controller  PS2Controller;
+fabgl::Keyboard* keyboard_ = NULL;
 
 
 void setup() {
@@ -30,6 +33,8 @@ void setup() {
   printf("Heap size before VGA init: %d\n", esp_get_free_heap_size());
   printf("DRAM size before VGA init: %d\n", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 #endif
+  PS2Controller.begin(PS2Preset::KeyboardPort0, KbdMode::CreateVirtualKeysQueue);
+  keyboard_ = PS2Controller.keyboard();
 
   init_button();
   init_events();
@@ -41,10 +46,10 @@ void setup() {
   init_settings();
   show_splash();
   init_trs_fs_posix();
+  trs_init_debugger(&init_debugger, keyboard_);
   init_wifi();
   vTaskDelay(5000 / portTICK_PERIOD_MS);
   //settingsCalibration.setScreenOffset();
-  PS2Controller.begin(PS2Preset::KeyboardPort0, KbdMode::CreateVirtualKeysQueue);
 
   z80_reset(0);
 
@@ -56,7 +61,6 @@ void setup() {
 
 void loop() {
   static fabgl::VirtualKey lastvk = fabgl::VK_NONE;
-  auto keyboard = PS2Controller.keyboard();
 
   z80_run();
 
@@ -64,13 +68,13 @@ void loop() {
     z80_reset();
   }
 
-  if (keyboard == nullptr || !keyboard->isKeyboardAvailable()) {
+  if (keyboard_ == nullptr) {
     return;
   }
-  if (keyboard->virtualKeyAvailable()) {
+  if (keyboard_->virtualKeyAvailable()) {
     bool down;
-    auto vk = keyboard->getNextVirtualKey(&down);
-    //printf("VirtualKey = %s\n", keyboard->virtualKeyToString(vk));
+    auto vk = keyboard_->getNextVirtualKey(&down);
+    //printf("VirtualKey = %s\n", keyboard_->virtualKeyToString(vk));
     if (down && vk == fabgl::VK_F3 && trs_screen.isTextMode()) {
       configure_pocket_trs();
     } else if (down && vk == fabgl::VK_F9) {

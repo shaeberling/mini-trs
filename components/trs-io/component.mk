@@ -10,6 +10,9 @@ COMPONENT_ADD_INCLUDEDIRS=$(TRS_IO)/libsmb2/include $(TRS_IO)/libsmb2/include/sm
 COMPONENT_SRCDIRS += $(TRS_IO)/trs-io
 COMPONENT_ADD_INCLUDEDIRS += $(TRS_IO)/trs-io/include
 COMPONENT_EMBED_FILES := $(TRS_IO)/trs-io/index.html
+COMPONENT_EMBED_FILES += $(TRS_IO)/trs-io/web_debugger.html
+COMPONENT_EMBED_FILES += $(TRS_IO)/trs-io/web_debugger.css
+COMPONENT_EMBED_FILES += $(TRS_IO)/trs-io/web_debugger.js
 
 COMPONENT_SRCDIRS += $(TRS_IO)/frehd
 COMPONENT_ADD_INCLUDEDIRS += $(TRS_IO)/frehd/include
