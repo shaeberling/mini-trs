@@ -4,3 +4,6 @@
 [submodule "components/FabGL"]
 	path = components/FabGL
 	url = https://github.com/fdivitto/FabGL.git
+[submodule "components/lilygo/lilygo-epd47-idf"]
+	path = components/lilygo/lilygo-epd47-idf
+	url = git@github.com:shaeberling/lilygo-epd47-idf.git
