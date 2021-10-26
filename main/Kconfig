@@ -1,0 +1,20 @@
+menu "PocketTRS"
+
+    config POCKET_TRS_TEST_PCB
+        bool "Run PocketTRS PCB tests"
+        default n
+        help
+        When selecting this option, the PocketTRS firmware
+        will run some tests for the SPI interface. The default
+        is not to run the tests. Note that this compile-time
+        option can also be activated by pushing the "PTRS RST"
+        button at boot time.
+
+    config POCKET_TRS_TTGO_VGA32_SUPPORT
+        bool "Add support for the TTGO VGA32 v1.4 board"
+        help
+        When selecting this option, PocketTRS will be configured
+        for the TTGO VGA32 v1.4 board. This will disable certain
+        functions (e.g., support for the 50 pin expansion interface,
+        cassette input, etc)
+endmenu
